@@ -62,6 +62,9 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
     private int previewWidth = 1280;
     private int previewHeight = 720;
     
+    // 当前 Activity (用于 PiP)
+    private Activity currentActivity;
+    
     /**
      * 检查是否启用屏幕模式
      */
@@ -70,6 +73,16 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
             Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/screen_mode.jpg"
         );
         return screenModeFile.exists();
+    }
+    
+    /**
+     * 检查是否启用自动 PiP 模式
+     */
+    private boolean isAutoPipEnabled() {
+        File pipFile = new File(
+            Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/auto_pip.jpg"
+        );
+        return pipFile.exists();
     }
     
     /**
@@ -98,11 +111,72 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
         // Hook Application.onCreate 获取 Context
         hookApplicationCreate(lpparam);
         
+        // Hook Activity 生命周期 (用于 PiP)
+        hookActivityLifecycle(lpparam);
+        
         // Hook Camera1 API
         hookCamera1(lpparam);
         
         // Hook Camera2 API
         hookCamera2(lpparam);
+    }
+    
+    private void hookActivityLifecycle(XC_LoadPackage.LoadPackageParam lpparam) {
+        // Hook Activity.onResume 获取当前 Activity
+        XposedHelpers.findAndHookMethod(
+            "android.app.Activity",
+            lpparam.classLoader,
+            "onResume",
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    currentActivity = (Activity) param.thisObject;
+                    
+                    // 如果启用了自动 PiP，设置 PiP 参数
+                    if (isAutoPipEnabled() && streamManager.isStreaming()) {
+                        PipModeHelper.enablePipSupport(currentActivity);
+                    }
+                }
+            }
+        );
+        
+        // Hook Activity.onUserLeaveHint (用户按 Home 键时触发)
+        XposedHelpers.findAndHookMethod(
+            "android.app.Activity",
+            lpparam.classLoader,
+            "onUserLeaveHint",
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Activity activity = (Activity) param.thisObject;
+                    
+                    // 如果正在屏幕录制且启用了自动 PiP，进入画中画模式
+                    if (isAutoPipEnabled() && streamManager.isStreaming()) {
+                        XposedBridge.log(TAG + "用户离开，尝试进入 PiP 模式");
+                        PipModeHelper.enterPipMode(activity);
+                    }
+                }
+            }
+        );
+        
+        // Hook Activity.onPictureInPictureModeChanged
+        XposedHelpers.findAndHookMethod(
+            "android.app.Activity",
+            lpparam.classLoader,
+            "onPictureInPictureModeChanged",
+            boolean.class,
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    boolean inPipMode = (boolean) param.args[0];
+                    XposedBridge.log(TAG + "PiP 模式变化: " + (inPipMode ? "进入" : "退出"));
+                    
+                    if (inPipMode) {
+                        showToast("已进入画中画模式\n可以操作其他应用了");
+                    }
+                }
+            }
+        );
     }
     
     private void hookApplicationCreate(XC_LoadPackage.LoadPackageParam lpparam) {

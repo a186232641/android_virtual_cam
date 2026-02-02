@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
     private Switch force_private_dir;
     private Switch disable_toast_switch;
     private Switch screen_mode_switch;
+    private Switch auto_pip_switch;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
@@ -63,6 +64,7 @@ public class MainActivity extends Activity {
         force_private_dir = findViewById(R.id.switch4);
         disable_toast_switch = findViewById(R.id.switch5);
         screen_mode_switch = findViewById(R.id.switch6);
+        auto_pip_switch = findViewById(R.id.switch7);
 
 
 
@@ -220,6 +222,29 @@ public class MainActivity extends Activity {
             }
         });
 
+        auto_pip_switch.setOnCheckedChangeListener((compoundButton, b) -> {
+            if (compoundButton.isPressed()) {
+                if (!has_permission()) {
+                    request_permission();
+                } else {
+                    File auto_pip_file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/auto_pip.jpg");
+                    if (auto_pip_file.exists() != b){
+                        if (b){
+                            try {
+                                auto_pip_file.createNewFile();
+                                Toast.makeText(this, "自动画中画已启用\n按Home键自动进入小窗", Toast.LENGTH_SHORT).show();
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }else {
+                            auto_pip_file.delete();
+                        }
+                    }
+                }
+                sync_statue_with_files();
+            }
+        });
+
     }
 
     private void request_permission() {
@@ -276,6 +301,9 @@ public class MainActivity extends Activity {
 
         File screen_mode_file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/screen_mode.jpg");
         screen_mode_switch.setChecked(screen_mode_file.exists());
+
+        File auto_pip_file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/auto_pip.jpg");
+        auto_pip_switch.setChecked(auto_pip_file.exists());
 
     }
 
