@@ -28,6 +28,7 @@ public class MainActivity extends Activity {
     private Switch play_sound_switch;
     private Switch force_private_dir;
     private Switch disable_toast_switch;
+    private Switch screen_mode_switch;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
@@ -61,6 +62,7 @@ public class MainActivity extends Activity {
         play_sound_switch = findViewById(R.id.switch3);
         force_private_dir = findViewById(R.id.switch4);
         disable_toast_switch = findViewById(R.id.switch5);
+        screen_mode_switch = findViewById(R.id.switch6);
 
 
 
@@ -194,6 +196,30 @@ public class MainActivity extends Activity {
             }
         });
 
+        screen_mode_switch.setOnCheckedChangeListener((compoundButton, b) -> {
+            if (compoundButton.isPressed()) {
+                if (!has_permission()) {
+                    request_permission();
+                } else {
+                    File screen_mode_file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/screen_mode.jpg");
+                    if (screen_mode_file.exists() != b){
+                        if (b){
+                            try {
+                                screen_mode_file.createNewFile();
+                                Toast.makeText(this, "屏幕模式已启用\n重启目标应用生效", Toast.LENGTH_SHORT).show();
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }else {
+                            screen_mode_file.delete();
+                            Toast.makeText(this, "屏幕模式已关闭\n将使用视频文件模式", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                }
+                sync_statue_with_files();
+            }
+        });
+
     }
 
     private void request_permission() {
@@ -247,6 +273,9 @@ public class MainActivity extends Activity {
 
         File disable_toast_file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/no_toast.jpg");
         disable_toast_switch.setChecked(disable_toast_file.exists());
+
+        File screen_mode_file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/screen_mode.jpg");
+        screen_mode_switch.setChecked(screen_mode_file.exists());
 
     }
 
