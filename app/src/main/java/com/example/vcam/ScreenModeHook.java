@@ -451,12 +451,7 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
         
         final Surface finalOutput = outputSurface;
         
-        // 启动前台服务 (Android 10+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ScreenCaptureService.start(appContext);
-        }
-        
-        // 开始屏幕流
+        // 直接开始屏幕流（目标应用在前台，不需要前台服务）
         streamManager.startStream(finalOutput, previewWidth, previewHeight);
         
         showToast("屏幕录制模式已启动");
