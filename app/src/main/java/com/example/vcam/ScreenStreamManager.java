@@ -122,7 +122,12 @@ public class ScreenStreamManager {
                 savedResultCode = resultCode;
                 savedResultData = new Intent(data);
                 
-                createMediaProjection();
+                // Android 10+ 使用前台服务
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForegroundServiceCapture();
+                } else {
+                    createMediaProjection();
+                }
                 
                 // 如果有等待的 Surface，立即开始流
                 if (currentOutputSurface != null) {
@@ -228,6 +233,49 @@ public class ScreenStreamManager {
         }
     }
     
+    /**
+     * 使用前台服务启动屏幕录制 (Android 10+)
+     */
+    private void startForegroundServiceCapture() {
+        if (context == null || savedResultData == null) {
+            XposedBridge.log(TAG + "无法启动前台服务：context 或权限数据为空");
+            return;
+        }
+        
+        // 设置服务回调
+        ScreenCaptureService.setCaptureCallback(new ScreenCaptureService.CaptureCallback() {
+            @Override
+            public void onCaptureStarted() {
+                permissionGranted = true;
+                isStreaming = true;
+                XposedBridge.log(TAG + "前台服务屏幕录制已启动");
+            }
+            
+            @Override
+            public void onCaptureStopped() {
+                isStreaming = false;
+                XposedBridge.log(TAG + "前台服务屏幕录制已停止");
+            }
+            
+            @Override
+            public void onCaptureError(String error) {
+                permissionGranted = false;
+                XposedBridge.log(TAG + "前台服务错误: " + error);
+            }
+        });
+        
+        // 启动前台服务
+        ScreenCaptureService.startCapture(
+            context, 
+            savedResultCode, 
+            savedResultData,
+            currentWidth > 0 ? currentWidth : screenWidth,
+            currentHeight > 0 ? currentHeight : screenHeight
+        );
+        
+        permissionGranted = true;
+    }
+    
     private void startStreamInternal() {
         if (isStreaming) {
             // 更新 Surface
@@ -240,6 +288,22 @@ public class ScreenStreamManager {
             return;
         }
         
+        // Android 10+ 使用前台服务
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ScreenCaptureService service = ScreenCaptureService.getInstance();
+            if (service != null) {
+                service.setOutputSurface(currentOutputSurface, currentWidth, currentHeight);
+                isStreaming = true;
+                XposedBridge.log(TAG + "通过前台服务启动屏幕流");
+                return;
+            } else if (savedResultData != null) {
+                // 服务未启动，尝试启动
+                startForegroundServiceCapture();
+                return;
+            }
+        }
+        
+        // Android 9 及以下，或前台服务不可用时的回退方案
         // 检查 MediaProjection 是否有效
         if (mediaProjection == null) {
             XposedBridge.log(TAG + "MediaProjection 无效，尝试重新创建");

@@ -1,6 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 存储权限 -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    
+    <!-- 音频录制权限 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    
+    <!-- 前台服务权限 (Android 9+) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <!-- 屏幕录制前台服务类型 (Android 10+) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
+    
+    <!-- 系统弹窗权限 (用于在其他应用上显示) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -27,6 +43,13 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:taskAffinity="" />
+        
+        <!-- 屏幕录制前台服务 (Android 10+ 必需) -->
+        <service
+            android:name=".ScreenCaptureService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <meta-data
             android:name="xposedmodule"
@@ -38,13 +61,5 @@
             android:name="xposedminversion"
             android:value="51" />
     </application>
-
-    <!-- 存储权限 -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-    
-    <!-- 音频录制权限 -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
 
 </manifest>
