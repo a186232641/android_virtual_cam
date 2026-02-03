@@ -3,6 +3,7 @@ package com.example.vcam;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.hardware.camera2.CameraCaptureSession;
@@ -130,6 +131,25 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
                     if (isAutoPipEnabled() && streamManager.isStreaming()) {
                         PipModeHelper.enablePipSupport(currentActivity);
                     }
+                }
+            }
+        );
+        
+        // Hook Activity.onActivityResult 处理屏幕录制权限结果
+        XposedHelpers.findAndHookMethod(
+            "android.app.Activity",
+            lpparam.classLoader,
+            "onActivityResult",
+            int.class, int.class, Intent.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    int requestCode = (int) param.args[0];
+                    int resultCode = (int) param.args[1];
+                    Intent data = (Intent) param.args[2];
+                    
+                    // 让 ScreenStreamManager 处理结果
+                    streamManager.handleActivityResult(requestCode, resultCode, data);
                 }
             }
         );
@@ -443,10 +463,12 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
         XposedBridge.log(TAG + "开始屏幕流，输出到: " + finalOutput.toString() + 
             " 尺寸: " + previewWidth + "x" + previewHeight);
         
-        // 开始屏幕流
-        streamManager.startStream(finalOutput, previewWidth, previewHeight);
-        
-        showToast("屏幕模式已启动\n" + previewWidth + "x" + previewHeight);
+        // 如果有当前 Activity，使用它来请求权限
+        if (currentActivity != null) {
+            streamManager.startStream(finalOutput, previewWidth, previewHeight, currentActivity);
+        } else {
+            streamManager.startStream(finalOutput, previewWidth, previewHeight, null);
+        }
     }
     
     private void showToast(String message) {

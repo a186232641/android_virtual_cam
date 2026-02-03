@@ -8,7 +8,6 @@ import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
-import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
@@ -115,59 +114,78 @@ public class ScreenStreamManager {
         
         XposedBridge.log(TAG + "请求屏幕录制权限...");
         
-        // 设置权限回调
-        ScreenCaptureActivity.permissionResultListener = (resultCode, data) -> {
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                // 保存权限数据，用于后续重新创建
-                savedResultCode = resultCode;
-                savedResultData = new Intent(data);
-                
-                // Android 10+ 使用前台服务
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    startForegroundServiceCapture();
-                } else {
-                    createMediaProjection();
-                }
-                
-                // 如果有等待的 Surface，立即开始流
-                if (currentOutputSurface != null) {
-                    startStreamInternal();
-                }
-                
-                showToast("屏幕录制已启动");
-            } else {
-                permissionGranted = false;
-                XposedBridge.log(TAG + "用户拒绝了屏幕录制权限");
-                showToast("屏幕录制权限被拒绝");
-            }
-        };
+        // 直接在目标应用中请求权限
+        // 使用 MediaProjectionManager 创建请求 Intent
+        if (projectionManager == null) {
+            XposedBridge.log(TAG + "projectionManager 为空");
+            return;
+        }
         
-        // 启动透明 Activity 请求权限
         try {
-            Intent intent = new Intent(activityContext, ScreenCaptureActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            activityContext.startActivity(intent);
-        } catch (Exception e) {
-            XposedBridge.log(TAG + "启动权限请求 Activity 失败: " + e.getMessage());
+            // 创建权限请求 Intent
+            Intent captureIntent = projectionManager.createScreenCaptureIntent();
             
-            // 尝试直接使用 context
-            try {
-                Intent intent = new Intent(context, ScreenCaptureActivity.class);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(intent);
-            } catch (Exception e2) {
-                XposedBridge.log(TAG + "备用方式也失败: " + e2.getMessage());
+            // 需要通过 Activity 来请求
+            if (activityContext instanceof Activity) {
+                Activity activity = (Activity) activityContext;
+                
+                // 保存回调，在 onActivityResult 中处理
+                pendingActivity = activity;
+                
+                activity.startActivityForResult(captureIntent, REQUEST_CODE_SCREEN_CAPTURE);
+                XposedBridge.log(TAG + "已发起权限请求");
+            } else {
+                XposedBridge.log(TAG + "Context 不是 Activity，无法请求权限");
+                showToast("请在应用内打开相机以请求屏幕录制权限");
             }
+        } catch (Exception e) {
+            XposedBridge.log(TAG + "请求权限失败: " + e.getMessage());
         }
     }
     
     /**
+     * 处理权限请求结果 (需要在 Hook 的 Activity.onActivityResult 中调用)
+     */
+    public void handleActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode != REQUEST_CODE_SCREEN_CAPTURE) {
+            return;
+        }
+        
+        XposedBridge.log(TAG + "收到权限结果: resultCode=" + resultCode);
+        
+        if (resultCode == Activity.RESULT_OK && data != null) {
+            savedResultCode = resultCode;
+            savedResultData = new Intent(data);
+            
+            createMediaProjection();
+            
+            if (currentOutputSurface != null) {
+                startStreamInternal();
+            }
+            
+            showToast("屏幕录制已启动");
+        } else {
+            permissionGranted = false;
+            XposedBridge.log(TAG + "用户拒绝了屏幕录制权限");
+            showToast("屏幕录制权限被拒绝");
+        }
+        
+        pendingActivity = null;
+    }
+    
+    private static final int REQUEST_CODE_SCREEN_CAPTURE = 19283;
+    private Activity pendingActivity;
+    
+    /**
      * 开始屏幕流到指定 Surface
      */
-    public void startStream(Surface surface, int width, int height) {
+    public void startStream(Surface surface, int width, int height, Activity activity) {
         this.currentOutputSurface = surface;
         this.currentWidth = width > 0 ? width : screenWidth;
         this.currentHeight = height > 0 ? height : screenHeight;
+        
+        XposedBridge.log(TAG + "startStream 调用，Surface: " + surface + 
+            " 尺寸: " + currentWidth + "x" + currentHeight);
         
         // 检查 MediaProjection 是否有效，如果无效尝试重新创建
         if (mediaProjection == null && savedResultData != null) {
@@ -176,15 +194,24 @@ public class ScreenStreamManager {
         }
         
         if (!permissionGranted || mediaProjection == null) {
-            XposedBridge.log(TAG + "等待权限授予...");
+            XposedBridge.log(TAG + "需要请求权限...");
             // 权限获取后会自动开始
-            if (context != null) {
-                requestPermission(context);
+            if (activity != null) {
+                requestPermission(activity);
+            } else if (context != null) {
+                XposedBridge.log(TAG + "没有 Activity，无法请求权限");
             }
             return;
         }
         
         startStreamInternal();
+    }
+    
+    /**
+     * 开始屏幕流（无 Activity 参数的重载）
+     */
+    public void startStream(Surface surface, int width, int height) {
+        startStream(surface, width, height, null);
     }
     
     /**
@@ -242,13 +269,22 @@ public class ScreenStreamManager {
             return;
         }
         
+        XposedBridge.log(TAG + "启动前台服务，Surface: " + currentOutputSurface + 
+            " 尺寸: " + currentWidth + "x" + currentHeight);
+        
         // 设置服务回调
         ScreenCaptureService.setCaptureCallback(new ScreenCaptureService.CaptureCallback() {
             @Override
             public void onCaptureStarted() {
                 permissionGranted = true;
-                isStreaming = true;
-                XposedBridge.log(TAG + "前台服务屏幕录制已启动");
+                XposedBridge.log(TAG + "前台服务屏幕录制已启动，设置输出 Surface");
+                
+                // 服务启动后，设置输出 Surface
+                ScreenCaptureService service = ScreenCaptureService.getInstance();
+                if (service != null && currentOutputSurface != null) {
+                    service.setOutputSurface(currentOutputSurface, currentWidth, currentHeight);
+                    isStreaming = true;
+                }
             }
             
             @Override
@@ -277,33 +313,17 @@ public class ScreenStreamManager {
     }
     
     private void startStreamInternal() {
-        if (isStreaming) {
-            // 更新 Surface
+        if (isStreaming && virtualDisplay != null) {
+            XposedBridge.log(TAG + "已在流式传输，更新 Surface");
             updateStream(currentOutputSurface, currentWidth, currentHeight);
             return;
         }
         
-        if (currentOutputSurface == null) {
-            XposedBridge.log(TAG + "输出 Surface 为空");
+        if (currentOutputSurface == null || !currentOutputSurface.isValid()) {
+            XposedBridge.log(TAG + "输出 Surface 为空或无效");
             return;
         }
         
-        // Android 10+ 使用前台服务
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ScreenCaptureService service = ScreenCaptureService.getInstance();
-            if (service != null) {
-                service.setOutputSurface(currentOutputSurface, currentWidth, currentHeight);
-                isStreaming = true;
-                XposedBridge.log(TAG + "通过前台服务启动屏幕流");
-                return;
-            } else if (savedResultData != null) {
-                // 服务未启动，尝试启动
-                startForegroundServiceCapture();
-                return;
-            }
-        }
-        
-        // Android 9 及以下，或前台服务不可用时的回退方案
         // 检查 MediaProjection 是否有效
         if (mediaProjection == null) {
             XposedBridge.log(TAG + "MediaProjection 无效，尝试重新创建");
@@ -315,6 +335,9 @@ public class ScreenStreamManager {
         }
         
         try {
+            XposedBridge.log(TAG + "创建 VirtualDisplay: " + currentWidth + "x" + currentHeight + 
+                " density=" + screenDensity);
+            
             virtualDisplay = mediaProjection.createVirtualDisplay(
                 "VCamScreen",
                 currentWidth,
@@ -322,37 +345,41 @@ public class ScreenStreamManager {
                 screenDensity,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 currentOutputSurface,
-                null,
-                null
+                new VirtualDisplay.Callback() {
+                    @Override
+                    public void onPaused() {
+                        XposedBridge.log(TAG + "VirtualDisplay 暂停");
+                    }
+                    
+                    @Override
+                    public void onResumed() {
+                        XposedBridge.log(TAG + "VirtualDisplay 恢复");
+                    }
+                    
+                    @Override
+                    public void onStopped() {
+                        XposedBridge.log(TAG + "VirtualDisplay 停止");
+                        isStreaming = false;
+                    }
+                },
+                mainHandler
             );
             
-            isStreaming = true;
-            XposedBridge.log(TAG + "屏幕流已启动: " + currentWidth + "x" + currentHeight);
+            if (virtualDisplay != null) {
+                isStreaming = true;
+                XposedBridge.log(TAG + "屏幕流已启动成功！");
+                showToast("屏幕录制已启动");
+            } else {
+                XposedBridge.log(TAG + "VirtualDisplay 创建返回 null");
+            }
             
         } catch (SecurityException e) {
-            // 权限失效，尝试重新创建
-            XposedBridge.log(TAG + "权限失效，尝试重新创建: " + e.getMessage());
-            createMediaProjection();
-            if (mediaProjection != null) {
-                try {
-                    virtualDisplay = mediaProjection.createVirtualDisplay(
-                        "VCamScreen",
-                        currentWidth,
-                        currentHeight,
-                        screenDensity,
-                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                        currentOutputSurface,
-                        null,
-                        null
-                    );
-                    isStreaming = true;
-                    XposedBridge.log(TAG + "重新创建后屏幕流已启动");
-                } catch (Exception e2) {
-                    XposedBridge.log(TAG + "重新创建后仍然失败: " + e2.getMessage());
-                }
-            }
+            XposedBridge.log(TAG + "权限失效: " + e.getMessage());
+            permissionGranted = false;
+            mediaProjection = null;
         } catch (Exception e) {
             XposedBridge.log(TAG + "启动屏幕流失败: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
