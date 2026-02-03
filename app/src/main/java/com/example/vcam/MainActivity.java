@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.Settings;
 import android.util.Log;
 import android.widget.Button;
 import android.widget.CompoundButton;
@@ -30,6 +31,8 @@ public class MainActivity extends Activity {
     private Switch disable_toast_switch;
     private Switch screen_mode_switch;
     private Switch auto_pip_switch;
+    
+    private static final int REQUEST_MANAGE_STORAGE = 100;
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
@@ -248,6 +251,33 @@ public class MainActivity extends Activity {
     }
 
     private void request_permission() {
+        // Android 11+ 需要 MANAGE_EXTERNAL_STORAGE 权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                builder.setTitle(R.string.permission_lack_warn);
+                builder.setMessage("Android 11+ 需要「所有文件访问」权限才能保存设置");
+                
+                builder.setNegativeButton(R.string.negative, (dialogInterface, i) -> 
+                    Toast.makeText(MainActivity.this, R.string.permission_lack_warn, Toast.LENGTH_SHORT).show());
+                
+                builder.setPositiveButton(R.string.positive, (dialogInterface, i) -> {
+                    try {
+                        Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                        intent.setData(Uri.parse("package:" + getPackageName()));
+                        startActivityForResult(intent, REQUEST_MANAGE_STORAGE);
+                    } catch (Exception e) {
+                        // 部分设备不支持直接跳转，使用通用设置页
+                        Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                        startActivityForResult(intent, REQUEST_MANAGE_STORAGE);
+                    }
+                });
+                builder.show();
+                return;
+            }
+        }
+        
+        // Android 6-10 使用传统存储权限
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (this.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_DENIED
                     || this.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_DENIED) {
@@ -264,11 +294,34 @@ public class MainActivity extends Activity {
     }
 
     private boolean has_permission() {
+        // Android 11+ 检查 MANAGE_EXTERNAL_STORAGE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return Environment.isExternalStorageManager();
+        }
+        
+        // Android 6-10 检查传统存储权限
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             return this.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_DENIED
                     && this.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_DENIED;
         }
         return true;
+    }
+    
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_MANAGE_STORAGE) {
+            // 从权限设置页返回，重新同步状态
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+                Toast.makeText(this, "权限已获取", Toast.LENGTH_SHORT).show();
+                // 创建目录
+                File camera_dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/");
+                if (!camera_dir.exists()) {
+                    camera_dir.mkdirs();
+                }
+            }
+            sync_statue_with_files();
+        }
     }
 
 
