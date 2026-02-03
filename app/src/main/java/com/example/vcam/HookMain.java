@@ -95,6 +95,13 @@ public class HookMain implements IXposedHookLoadPackage {
     public Context toast_content;
 
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Exception {
+        // 如果启用了屏幕模式，跳过视频替换模式（由 ScreenModeHook 处理）
+        File screenModeFile = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/screen_mode.jpg");
+        if (screenModeFile.exists()) {
+            XposedBridge.log("【VCAM】屏幕模式已启用，跳过视频替换模式");
+            return;
+        }
+        
         XposedHelpers.findAndHookMethod("android.hardware.Camera", lpparam.classLoader, "setPreviewTexture", SurfaceTexture.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
