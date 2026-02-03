@@ -328,6 +328,9 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
                     
                     c2StateCallback = (CameraDevice.StateCallback) param.args[1];
                     
+                    // 创建假的 Surface 给相机
+                    createFakeSurface();
+                    
                     XposedBridge.log(TAG + "[Camera2] openCamera 已拦截");
                 }
             }
@@ -349,13 +352,16 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
                         
                         c2StateCallback = (CameraDevice.StateCallback) param.args[2];
                         
+                        // 创建假的 Surface 给相机
+                        createFakeSurface();
+                        
                         XposedBridge.log(TAG + "[Camera2] openCamera (Executor) 已拦截");
                     }
                 }
             );
         }
         
-        // Hook CaptureRequest.Builder.addTarget - 捕获预览 Surface
+        // Hook CaptureRequest.Builder.addTarget - 替换预览 Surface
         XposedHelpers.findAndHookMethod(
             "android.hardware.camera2.CaptureRequest.Builder",
             lpparam.classLoader,
@@ -370,11 +376,51 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
                     String surfaceInfo = surface.toString();
                     
                     // 保存预览 Surface（不是 ImageReader 的 Surface）
-                    // ImageReader 的 Surface 通常显示为 "Surface(name=null)"
                     if (!surfaceInfo.contains("Surface(name=null)")) {
                         c2PreviewSurface = surface;
                         XposedBridge.log(TAG + "[Camera2] 捕获到预览 Surface: " + surfaceInfo);
+                        
+                        // 替换为假的 Surface，让相机输出到假的 Surface
+                        if (c2VirtualSurface != null) {
+                            param.args[0] = c2VirtualSurface;
+                            XposedBridge.log(TAG + "[Camera2] 已替换为假 Surface");
+                        }
                     }
+                }
+            }
+        );
+        
+        // Hook CameraDevice.createCaptureSession - 替换 Surface 列表
+        XposedHelpers.findAndHookMethod(
+            "android.hardware.camera2.impl.CameraDeviceImpl",
+            lpparam.classLoader,
+            "createCaptureSession",
+            java.util.List.class,
+            CameraCaptureSession.StateCallback.class,
+            Handler.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (isDisabled() || c2VirtualSurface == null) return;
+                    
+                    @SuppressWarnings("unchecked")
+                    java.util.List<Surface> surfaces = (java.util.List<Surface>) param.args[0];
+                    java.util.List<Surface> newSurfaces = new java.util.ArrayList<>();
+                    
+                    for (Surface s : surfaces) {
+                        String info = s.toString();
+                        if (!info.contains("Surface(name=null)")) {
+                            // 预览 Surface，保存并替换
+                            c2PreviewSurface = s;
+                            newSurfaces.add(c2VirtualSurface);
+                            XposedBridge.log(TAG + "[Camera2] createCaptureSession 替换预览 Surface");
+                        } else {
+                            // ImageReader Surface，保持不变
+                            newSurfaces.add(s);
+                        }
+                    }
+                    
+                    param.args[0] = newSurfaces;
                 }
             }
         );
@@ -423,6 +469,24 @@ public class ScreenModeHook implements IXposedHookLoadPackage {
                 }
             }
         );
+    }
+    
+    /**
+     * 创建假的 Surface 给 Camera2
+     */
+    private void createFakeSurface() {
+        if (c2VirtualTexture != null) {
+            c2VirtualTexture.release();
+        }
+        if (c2VirtualSurface != null) {
+            c2VirtualSurface.release();
+        }
+        
+        c2VirtualTexture = new SurfaceTexture(100);
+        c2VirtualTexture.setDefaultBufferSize(1920, 1080);
+        c2VirtualSurface = new Surface(c2VirtualTexture);
+        
+        XposedBridge.log(TAG + "[Camera2] 假 Surface 已创建");
     }
     
     private void hookCameraDeviceOpened(Class<?> callbackClass) {

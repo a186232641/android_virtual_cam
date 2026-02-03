@@ -252,64 +252,14 @@ public class ScreenStreamManager {
                 
                 permissionGranted = true;
                 XposedBridge.log(TAG + "MediaProjection 创建成功");
+            } else {
+                XposedBridge.log(TAG + "getMediaProjection 返回 null");
             }
         } catch (Exception e) {
             XposedBridge.log(TAG + "创建 MediaProjection 失败: " + e.getMessage());
             permissionGranted = false;
             mediaProjection = null;
         }
-    }
-    
-    /**
-     * 使用前台服务启动屏幕录制 (Android 10+)
-     */
-    private void startForegroundServiceCapture() {
-        if (context == null || savedResultData == null) {
-            XposedBridge.log(TAG + "无法启动前台服务：context 或权限数据为空");
-            return;
-        }
-        
-        XposedBridge.log(TAG + "启动前台服务，Surface: " + currentOutputSurface + 
-            " 尺寸: " + currentWidth + "x" + currentHeight);
-        
-        // 设置服务回调
-        ScreenCaptureService.setCaptureCallback(new ScreenCaptureService.CaptureCallback() {
-            @Override
-            public void onCaptureStarted() {
-                permissionGranted = true;
-                XposedBridge.log(TAG + "前台服务屏幕录制已启动，设置输出 Surface");
-                
-                // 服务启动后，设置输出 Surface
-                ScreenCaptureService service = ScreenCaptureService.getInstance();
-                if (service != null && currentOutputSurface != null) {
-                    service.setOutputSurface(currentOutputSurface, currentWidth, currentHeight);
-                    isStreaming = true;
-                }
-            }
-            
-            @Override
-            public void onCaptureStopped() {
-                isStreaming = false;
-                XposedBridge.log(TAG + "前台服务屏幕录制已停止");
-            }
-            
-            @Override
-            public void onCaptureError(String error) {
-                permissionGranted = false;
-                XposedBridge.log(TAG + "前台服务错误: " + error);
-            }
-        });
-        
-        // 启动前台服务
-        ScreenCaptureService.startCapture(
-            context, 
-            savedResultCode, 
-            savedResultData,
-            currentWidth > 0 ? currentWidth : screenWidth,
-            currentHeight > 0 ? currentHeight : screenHeight
-        );
-        
-        permissionGranted = true;
     }
     
     private void startStreamInternal() {
