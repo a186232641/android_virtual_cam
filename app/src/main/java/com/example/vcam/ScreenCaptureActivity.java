@@ -50,7 +50,12 @@ public class ScreenCaptureActivity extends Activity {
             XposedBridge.log(TAG + "权限结果: " + (resultCode == RESULT_OK ? "允许" : "拒绝"));
             
             if (permissionResultListener != null) {
-                permissionResultListener.onPermissionResult(resultCode, data);
+                // 克隆 Intent 数据，确保可以保存
+                Intent clonedData = null;
+                if (data != null) {
+                    clonedData = new Intent(data);
+                }
+                permissionResultListener.onPermissionResult(resultCode, clonedData);
             }
         }
         
